@@ -1,0 +1,13 @@
+{
+    "name": "yourusername/wordpress-audit-plugin",
+    "description": "A plugin to audit WordPress settings and other criteria.",
+    "type": "wordpress-plugin",
+    "require": {
+        "yahnis-elsts/plugin-update-checker": "^5.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "YourNamespace\\WordPressAuditPlugin\\": "includes/"
+        }
+    }
+}

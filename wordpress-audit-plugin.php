@@ -12,6 +12,18 @@
 
 defined( 'ABSPATH' ) || exit;
 
+require_once __DIR__ . '/vendor/autoload.php'; // Composer autoload
+
+use YahnisElsts\PluginUpdateChecker\v5\PucFactory;
+
+$updateChecker = PucFactory::buildUpdateChecker(
+    'https://github.com/TeamIMGE/wordpress-audit-plugin',
+    __FILE__,
+    'wordpress-audit-plugin'
+);
+
+$updateChecker->setBranch('main');
+
 define( 'WPA_VERSION', '1.0.0' );
 define( 'WPA_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WPA_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
