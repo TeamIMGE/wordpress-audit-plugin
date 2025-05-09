@@ -29,5 +29,14 @@ define( 'WPA_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WPA_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 
 require_once WPA_PLUGIN_DIR . 'includes/class-wpa-core.php';
+require_once WPA_PLUGIN_DIR . 'includes/class-wpa-ajax.php';
 
 add_action( 'plugins_loaded', ['WPA_Core', 'init'] );
+
+// Initialize the plugin
+function wpa_init() {
+    WPA_Admin::init();
+    WPA_Auditor::init();
+    WPA_Ajax::init();
+}
+add_action('plugins_loaded', 'wpa_init');
