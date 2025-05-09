@@ -65,41 +65,383 @@ class WPA_Admin {
             <div class="tab-content">
                 <?php if (isset($report[$current_tab])) : ?>
                     <?php if ($current_tab === 'images') : ?>
-                        <table class="widefat">
-                            <thead>
-                                <tr>
-                                    <th>Image</th>
-                                    <th>Title</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($report[$current_tab] as $check) : ?>
+                        <?php foreach ($report[$current_tab] as $check) : ?>
+                            <?php if (isset($check['debug'])) : ?>
+                                <div class="notice notice-info">
+                                    <p><strong>Debug Information:</strong></p>
+                                    <p><?php echo wp_kses_post($check['debug']); ?></p>
+                                </div>
+                            <?php endif; ?>
+                            <table class="widefat">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 100px;">Image</th>
+                                        <th style="width: 100px;">Status</th>
+                                        <th style="width: 200px;">Title</th>
+                                        <th>Details</th>
+                                        <th style="width: 250px;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
                                     <?php if (!empty($check['details'])) : ?>
-                                        <?php foreach ($check['details'] as $image) : ?>
+                                        <?php 
+                                        // Sort images to prioritize failed items
+                                        $sorted_images = $check['details'];
+                                        usort($sorted_images, function($a, $b) {
+                                            if ($a['status'] === $b['status']) return 0;
+                                            return $a['status'] === 'failed' ? -1 : 1;
+                                        });
+                                        foreach ($sorted_images as $image) : 
+                                        ?>
                                             <tr>
                                                 <td>
                                                     <img src="<?php echo esc_url($image['url']); ?>" 
                                                          alt="" 
                                                          style="max-width: 100px; height: auto;">
                                                 </td>
+                                                <td>
+                                                    <?php 
+                                                    $status_icon = '';
+                                                    $status_text = '';
+                                                    switch ($image['status']) {
+                                                        case 'failed':
+                                                            $status_icon = '❌';
+                                                            $status_text = 'Failed';
+                                                            break;
+                                                        case 'warning':
+                                                            $status_icon = '⚠️';
+                                                            $status_text = 'Warning';
+                                                            break;
+                                                        default:
+                                                            $status_icon = '✅';
+                                                            $status_text = 'Passed';
+                                                    }
+                                                    echo $status_icon . ' ' . $status_text;
+                                                    ?>
+                                                </td>
                                                 <td><?php echo esc_html($image['title']); ?></td>
                                                 <td>
-                                                    <a href="<?php echo esc_url(admin_url('post.php?post=' . $image['id'] . '&action=edit')); ?>" 
-                                                       class="button button-small">
-                                                        Edit Image
-                                                    </a>
+                                                    <?php if (!empty($image['issues']) || !empty($image['warnings'])) : ?>
+                                                        <div class="details-content">
+                                                            <ul>
+                                                                <?php 
+                                                                // Show details first
+                                                                if (!empty($image['details'])) {
+                                                                    foreach ($image['details'] as $detail) {
+                                                                        echo '<li class="detail-item">' . esc_html($detail) . '</li>';
+                                                                    }
+                                                                }
+                                                                // Then show issues
+                                                                if (!empty($image['issues'])) {
+                                                                    foreach ($image['issues'] as $issue) {
+                                                                        echo '<li class="issue-item">' . esc_html($issue) . '</li>';
+                                                                    }
+                                                                }
+                                                                // Then show warnings
+                                                                if (!empty($image['warnings'])) {
+                                                                    foreach ($image['warnings'] as $warning) {
+                                                                        echo '<li class="warning-item">' . esc_html($warning) . '</li>';
+                                                                    }
+                                                                }
+                                                                ?>
+                                                            </ul>
+                                                        </div>
+                                                    <?php endif; ?>
+                                                </td>
+                                                <td>
+                                                    <div class="action-buttons">
+                                                        <a href="<?php echo esc_url($image['edit_url']); ?>" 
+                                                           class="button button-small">
+                                                            Edit Image
+                                                        </a>
+                                                        <?php 
+                                                        // Check if any issue contains "Missing alt text"
+                                                        $has_missing_alt = false;
+                                                        foreach ($image['issues'] as $issue) {
+                                                            if (strpos($issue, 'Missing alt text') !== false) {
+                                                                $has_missing_alt = true;
+                                                                break;
+                                                            }
+                                                        }
+                                                        if ($has_missing_alt) : 
+                                                        ?>
+                                                            <div class="alt-text-editor">
+                                                                <input type="text" 
+                                                                       class="alt-text-input" 
+                                                                       placeholder="Add alternative text..."
+                                                                       data-image-id="<?php echo esc_attr($image['id']); ?>"
+                                                                       data-nonce="<?php echo wp_create_nonce('wpa_inline_edit'); ?>">
+                                                                <button type="button" 
+                                                                        class="button button-small save-alt-text"
+                                                                        data-image-id="<?php echo esc_attr($image['id']); ?>"
+                                                                        data-nonce="<?php echo wp_create_nonce('wpa_inline_edit'); ?>">
+                                                                    Save
+                                                                </button>
+                                                            </div>
+                                                        <?php endif; ?>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         <?php endforeach; ?>
                                     <?php else : ?>
                                         <tr>
-                                            <td colspan="3"><?php echo esc_html($check['message']); ?></td>
+                                            <td colspan="5"><?php echo esc_html($check['message']); ?></td>
                                         </tr>
                                     <?php endif; ?>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
+                                </tbody>
+                            </table>
+
+                            <script>
+                            jQuery(document).ready(function($) {
+                                // Create message container if it doesn't exist
+                                if (!$('#wpa-message-container').length) {
+                                    $('body').append('<div id="wpa-message-container"></div>');
+                                }
+
+                                function showMessage(message, type) {
+                                    var messageHtml = $('<div class="wpa-message notice notice-' + type + '"><p>' + message + '</p></div>');
+                                    $('#wpa-message-container').append(messageHtml);
+                                    
+                                    // Trigger reflow to enable animation
+                                    messageHtml[0].offsetHeight;
+                                    
+                                    messageHtml.addClass('show');
+                                    
+                                    setTimeout(function() {
+                                        messageHtml.removeClass('show');
+                                        setTimeout(function() {
+                                            messageHtml.remove();
+                                        }, 300);
+                                    }, type === 'success' ? 3000 : 5000);
+                                }
+
+                                $('.save-alt-text').on('click', function() {
+                                    var button = $(this);
+                                    var input = button.prev('.alt-text-input');
+                                    var imageId = button.data('image-id');
+                                    var nonce = button.data('nonce');
+                                    var altText = input.val().trim();
+                                    var row = button.closest('tr');
+                                    var actionButtons = button.closest('.action-buttons');
+
+                                    // Validate input
+                                    if (!altText) {
+                                        showMessage('Please enter alternative text', 'error');
+                                        input.addClass('error').focus();
+                                        return;
+                                    }
+
+                                    // Basic XSS prevention - remove any HTML tags
+                                    altText = altText.replace(/<[^>]*>/g, '');
+
+                                    // Disable input and button, show loading state
+                                    input.prop('disabled', true)
+                                         .removeClass('error');
+                                    button.prop('disabled', true)
+                                          .text('Saving...')
+                                          .addClass('updating-message');
+
+                                    $.post(ajaxurl, {
+                                        action: 'wpa_save_alt_text',
+                                        image_id: imageId,
+                                        alt_text: altText,
+                                        nonce: nonce
+                                    }, function(response) {
+                                        if (response.success) {
+                                            // Show success message
+                                            showMessage('Alt text updated successfully', 'success');
+
+                                            // Remove the alt text editor
+                                            actionButtons.find('.alt-text-editor').fadeOut(400, function() {
+                                                $(this).remove();
+                                            });
+                                            
+                                            // Check the image status after alt text update
+                                            $.post(ajaxurl, {
+                                                action: 'wpa_check_image_status',
+                                                image_id: imageId,
+                                                nonce: nonce
+                                            }, function(statusResponse) {
+                                                if (statusResponse.success) {
+                                                    var detailsContent = row.find('.details-content');
+                                                    var detailsList = detailsContent.find('ul');
+                                                    
+                                                    // Remove the "Missing alt text" item
+                                                    detailsList.find('li:contains("Missing alt text")').remove();
+                                                    
+                                                    // Add any remaining issues or warnings
+                                                    var allIssues = statusResponse.data.issues.concat(statusResponse.data.warnings);
+                                                    if (allIssues.length > 0) {
+                                                        // Update the list with remaining issues
+                                                        detailsList.empty();
+                                                        
+                                                        // Add details first
+                                                        if (statusResponse.data.details && statusResponse.data.details.length > 0) {
+                                                            statusResponse.data.details.forEach(function(detail) {
+                                                                detailsList.append('<li class="detail-item">' + detail + '</li>');
+                                                            });
+                                                        }
+                                                        
+                                                        // Then add issues and warnings
+                                                        statusResponse.data.issues.forEach(function(issue) {
+                                                            detailsList.append('<li class="issue-item">' + issue + '</li>');
+                                                        });
+                                                        statusResponse.data.warnings.forEach(function(warning) {
+                                                            detailsList.append('<li class="warning-item">' + warning + '</li>');
+                                                        });
+                                                        
+                                                        // Update status based on the response
+                                                        var statusIcon = '';
+                                                        var statusText = '';
+                                                        switch (statusResponse.data.status) {
+                                                            case 'failed':
+                                                                statusIcon = '❌';
+                                                                statusText = 'Failed';
+                                                                break;
+                                                            case 'warning':
+                                                                statusIcon = '⚠️';
+                                                                statusText = 'Warning';
+                                                                break;
+                                                            default:
+                                                                statusIcon = '✅';
+                                                                statusText = 'Passed';
+                                                        }
+                                                        row.find('td:nth-child(2)').html(statusIcon + ' ' + statusText);
+                                                    } else {
+                                                        // If no issues remain, remove the row
+                                                        row.fadeOut(400, function() {
+                                                            $(this).remove();
+                                                            
+                                                            // If no more rows, show the "all passed" message
+                                                            if ($('tbody tr').length === 0) {
+                                                                $('tbody').append(
+                                                                    '<tr><td colspan="5">All images have proper metadata</td></tr>'
+                                                                );
+                                                            }
+                                                        });
+                                                    }
+                                                }
+                                            });
+                                        } else {
+                                            // Show error message
+                                            showMessage('Failed to update alt text: ' + response.data, 'error');
+
+                                            // Re-enable input and button
+                                            input.prop('disabled', false);
+                                            button.prop('disabled', false)
+                                                  .text('Save')
+                                                  .removeClass('updating-message');
+                                        }
+                                    }).fail(function() {
+                                        // Handle AJAX failure
+                                        showMessage('Failed to update alt text: Network error', 'error');
+
+                                        // Re-enable input and button
+                                        input.prop('disabled', false);
+                                        button.prop('disabled', false)
+                                              .text('Save')
+                                              .removeClass('updating-message');
+                                    });
+                                });
+
+                                // Remove error class on input
+                                $('.alt-text-input').on('input', function() {
+                                    $(this).removeClass('error');
+                                });
+                            });
+                            </script>
+
+                            <style>
+                            .details-content {
+                                background: #f8f8f8;
+                                padding: 10px;
+                                border: 1px solid #ddd;
+                                border-radius: 3px;
+                            }
+                            .details-content ul {
+                                margin: 0;
+                                padding-left: 20px;
+                                color: #666;
+                                font-size: 0.9em;
+                            }
+                            .details-content ul li:last-child {
+                                margin-bottom: 0;
+                            }
+                            .details-content ul .detail-item {
+                                color: #666;
+                                font-style: italic;
+                            }
+                            .details-content ul .issue-item {
+                                color: #d63638;
+                            }
+                            .details-content ul .warning-item {
+                                color: #dba617;
+                            }
+                            .action-buttons {
+                                display: flex;
+                                flex-direction: column;
+                                gap: 5px;
+                                align-items: flex-start;
+                                width: 250px; /* Fixed width to match column */
+                            }
+                            .action-buttons .button {
+                                width: auto;
+                                min-width: 0;
+                            }
+                            .alt-text-editor {
+                                display: flex;
+                                gap: 5px;
+                                margin-top: 5px;
+                                width: 100%;
+                            }
+                            .alt-text-input {
+                                flex: 1;
+                                min-width: 0; /* Allow input to shrink */
+                                max-width: 180px; /* Prevent input from being too wide */
+                            }
+                            .alt-text-input.error {
+                                border-color: #dc3232;
+                                box-shadow: 0 0 2px rgba(220, 50, 50, 0.8);
+                            }
+                            .updating-message {
+                                opacity: 0.7;
+                                cursor: not-allowed;
+                            }
+                            #wpa-message-container {
+                                position: fixed;
+                                top: 32px;
+                                right: 20px;
+                                z-index: 999999;
+                                max-width: 400px;
+                            }
+                            .wpa-message {
+                                margin: 0 0 10px 0;
+                                padding: 10px 15px;
+                                border-radius: 4px;
+                                box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+                                transform: translateX(120%);
+                                transition: transform 0.3s ease-out;
+                            }
+                            .wpa-message.show {
+                                transform: translateX(0);
+                            }
+                            .wpa-message.notice-success {
+                                background: #f0f8f0;
+                                border-left: 4px solid #46b450;
+                            }
+                            .wpa-message.notice-error {
+                                background: #fef7f7;
+                                border-left: 4px solid #dc3232;
+                            }
+                            /* Add styles for other tabs */
+                            .widefat td.failed {
+                                color: #d63638;
+                            }
+                            .widefat td.warning {
+                                color: #dba617;
+                            }
+                            </style>
+                        <?php endforeach; ?>
                     <?php else : ?>
                         <table class="widefat">
                             <thead>

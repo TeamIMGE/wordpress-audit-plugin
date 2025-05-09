@@ -115,31 +115,87 @@ class WPA_Auditor {
         ];
     }
 
-    public static function check_image_metadata() {
-        $args = [
+    private static function check_image_metadata() {
+        $images = get_posts([
             'post_type' => 'attachment',
             'post_mime_type' => 'image',
-            'posts_per_page' => -1, // Get all images
-        ];
-        $query = new WP_Query($args);
-        $missing_alt = [];
+            'posts_per_page' => -1,
+            'post_status' => 'inherit'
+        ]);
 
-        foreach ($query->posts as $img) {
-            $alt = get_post_meta($img->ID, '_wp_attachment_image_alt', true);
-            if (empty($alt)) {
-                $missing_alt[] = [
-                    'id' => $img->ID,
-                    'title' => get_the_title($img->ID),
-                    'url' => wp_get_attachment_url($img->ID)
+        $images_with_issues = [];
+        foreach ($images as $image) {
+            $alt_text = get_post_meta($image->ID, '_wp_attachment_image_alt', true);
+            $title = $image->post_title;
+            $file_path = get_attached_file($image->ID);
+            $metadata = wp_get_attachment_metadata($image->ID);
+            
+            $issues = [];
+            $warnings = [];
+            $status = 'passed';
+            
+            // Check for missing alt text
+            if (empty($alt_text)) {
+                $issues[] = 'Missing alt text';
+                $status = 'failed';
+            }
+            
+            // Check dimensions and file size
+            if (!empty($metadata['width']) && !empty($metadata['height'])) {
+                $width = $metadata['width'];
+                $height = $metadata['height'];
+                
+                // Get file size first
+                $size_mb = 0;
+                if ($file_path && file_exists($file_path)) {
+                    $size = filesize($file_path);
+                    $size_mb = $size / 1024 / 1024; // Convert to MB
+                }
+                
+                // File size checks
+                if ($size_mb >= 1) {
+                    $issues[] = 'The image is too large. Consider optimizing below 0.5MBs/500KBs but definitely lower than 1MB.';
+                    $status = 'failed';
+                } elseif ($size_mb >= 0.5) {
+                    $warnings[] = 'The image is a bit too large. Consider optimizing it below 0.5MBs/500KBs.';
+                    if ($status !== 'failed') {
+                        $status = 'warning';
+                    }
+                }
+            }
+            
+            // Only add to results if there are issues or warnings
+            if (!empty($issues) || !empty($warnings)) {
+                $details = [];
+                
+                // Always include dimension details for images with issues
+                if (!empty($metadata['width']) && !empty($metadata['height'])) {
+                    $details[] = sprintf('Dimensions: %dpx × %dpx', $metadata['width'], $metadata['height']);
+                }
+                if ($file_path && file_exists($file_path)) {
+                    $size = filesize($file_path);
+                    $size_mb = $size / 1024 / 1024;
+                    $details[] = sprintf('File size: %.2f MB', $size_mb);
+                }
+
+                $images_with_issues[] = [
+                    'id' => $image->ID,
+                    'title' => $title,
+                    'url' => wp_get_attachment_url($image->ID),
+                    'edit_url' => get_edit_post_link($image->ID),
+                    'status' => $status,
+                    'issues' => $issues,
+                    'warnings' => $warnings,
+                    'details' => $details
                 ];
             }
         }
 
         return [
-            'label' => 'Images Missing Alt Text',
-            'status' => empty($missing_alt),
-            'message' => empty($missing_alt) ? 'All images have alt text.' : sprintf('Found %d images without alt text.', count($missing_alt)),
-            'details' => $missing_alt
+            'status' => empty($images_with_issues),
+            'label' => 'Image Metadata',
+            'message' => empty($images_with_issues) ? 'All images have proper metadata' : 'Found images with metadata issues',
+            'details' => $images_with_issues
         ];
     }
 }
