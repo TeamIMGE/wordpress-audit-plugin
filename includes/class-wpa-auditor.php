@@ -40,11 +40,25 @@ class WPA_Auditor {
             ]];
         }
 
-        return [
+        // Get individual check results
+        $checks = [
             self::check_yoast_title_template(),
             self::check_yoast_site_image(),
-            // Add more Yoast checks here
+            self::check_yoast_author_archives(),
+            self::check_yoast_date_archives(),
+            self::check_yoast_format_archives(),
+            self::check_yoast_media_pages(),
+            // Custom post types will be merged separately as they return multiple results
+            // Add more single Yoast checks here
         ];
+
+        // Get individual custom post type checks and merge them
+        $custom_post_type_checks = self::check_yoast_custom_post_types();
+        if (!empty($custom_post_type_checks)) {
+            $checks = array_merge($checks, $custom_post_type_checks);
+        }
+
+        return $checks;
     }
 
     private static function get_image_checks() {
@@ -113,6 +127,196 @@ class WPA_Auditor {
             'status' => !empty($site_image),
             'message' => $site_image ? 'Site image is set.' : 'No site image set.'
         ];
+    }
+
+    private static function check_yoast_author_archives() {
+        $yoast_options = get_option('wpseo_titles');
+        $author_archives_enabled = isset($yoast_options['disable-author']) ? !$yoast_options['disable-author'] : true;
+
+        $result = [
+            'label' => 'Author Archives',
+        ];
+
+        if ($author_archives_enabled) {
+            $result['status'] = false; // Warning condition met
+            $result['message'] = 'Author Archives is enabled. If you are not using these pages, disable the author archives in the SEO settings.';
+            $result['type'] = 'warning';
+            $result['action'] = [
+                'label' => 'Edit Settings',
+                'url' => admin_url('admin.php?page=wpseo_titles#archives')
+            ];
+        } else {
+            $result['status'] = true; // Passed
+            $result['message'] = 'Author Archives is disabled.';
+            $result['type'] = 'passed'; // Although not strictly needed, explicitly setting type for clarity
+        }
+
+        return $result;
+    }
+
+    private static function check_yoast_date_archives() {
+        $yoast_options = get_option('wpseo_titles');
+        $date_archives_enabled = isset($yoast_options['disable-date']) ? !$yoast_options['disable-date'] : true;
+
+        $result = [
+            'label' => 'Date Archives',
+        ];
+
+        if ($date_archives_enabled) {
+            $result['status'] = false; // Warning condition met
+            $result['message'] = 'Date Archives is enabled. If you are not using these pages, disable the date archives in the SEO settings.';
+            $result['type'] = 'warning';
+            $result['action'] = [
+                'label' => 'Edit Settings',
+                'url' => admin_url('admin.php?page=wpseo_titles#archives')
+            ];
+        } else {
+            $result['status'] = true; // Passed
+            $result['message'] = 'Date Archives is disabled.';
+            $result['type'] = 'passed'; // Explicitly setting type for clarity
+        }
+
+        return $result;
+    }
+
+    private static function check_yoast_format_archives() {
+        $yoast_options = get_option('wpseo_titles');
+        $format_archives_enabled = isset($yoast_options['disable-post_format']) ? !$yoast_options['disable-post_format'] : true;
+
+        $result = [
+            'label' => 'Format Archives',
+        ];
+
+        if ($format_archives_enabled) {
+            $result['status'] = false; // Warning condition met
+            $result['message'] = 'Format Archives is enabled. If you are not using these pages, disable the format archives in the SEO settings.';
+            $result['type'] = 'warning';
+            $result['action'] = [
+                'label' => 'Edit Settings',
+                'url' => admin_url('admin.php?page=wpseo_titles#archives')
+            ];
+        } else {
+            $result['status'] = true; // Passed
+            $result['message'] = 'Format Archives is disabled.';
+            $result['type'] = 'passed'; // Explicitly setting type for clarity
+        }
+
+        return $result;
+    }
+
+    private static function check_yoast_media_pages() {
+        $yoast_options = get_option('wpseo_titles');
+        $media_pages_enabled = isset($yoast_options['disable-attachment']) ? !$yoast_options['disable-attachment'] : true;
+
+        $result = [
+            'label' => 'Media Pages',
+        ];
+
+        if ($media_pages_enabled) {
+            // Media pages enabled is a failure
+            $result['status'] = false;
+            $result['message'] = 'Media pages are enabled. These should be disabled in the SEO settings.';
+            $result['type'] = 'failed';
+            $result['action'] = [
+                'label' => 'Edit Settings',
+                'url' => admin_url('admin.php?page=wpseo_titles#post-type')
+            ];
+        } else {
+            // Media pages disabled is a pass
+            $result['status'] = true;
+            $result['message'] = 'Media pages are disabled.';
+            $result['type'] = 'passed'; // Explicitly set type for clarity
+        }
+
+        return $result;
+    }
+
+    private static function check_yoast_custom_post_types() {
+        $yoast_options = get_option('wpseo_titles');
+        // Get all non-built-in post types
+        $post_types = get_post_types(['_builtin' => false], 'objects');
+
+        $custom_post_type_checks = [];
+
+        foreach ($post_types as $post_type) {
+            // Skip post types that Yoast excludes by default or are not relevant for SEO checks
+            // 'attachment' is handled by check_yoast_media_pages()
+            // 'wpa_audit_log' is an internal post type
+            if (in_array($post_type->name, ['attachment', 'wpa_audit_log'])) {
+                 continue;
+            }
+
+            // Check if the Yoast noindex option exists and its value for this post type
+            $yoast_noindex_option_exists = isset($yoast_options['noindex-' . $post_type->name]);
+            // Yoast saves noindex as '1' for true and '0' for false.
+            // $yoast_options['noindex-' . $post_type->name] will be the string '1' or '0' if set.
+            // We need to check explicitly against '1' for the noindex true case.
+            $yoast_noindex_is_true = $yoast_noindex_option_exists && (string)$yoast_options['noindex-' . $post_type->name] === '1';
+
+            // Debugging output for custom post types (moved after calculation)
+            if ($post_type->name === 'page_section') {
+                echo '<pre>Debug: Page Section Post Type</pre>';
+                var_dump($post_type->name, $post_type->public, $yoast_noindex_option_exists, (isset($yoast_options['noindex-' . $post_type->name]) ? $yoast_options['noindex-' . $post_type->name] : 'N/A'), $yoast_noindex_is_true);
+                echo '<pre>End Debug</pre>';
+            }
+
+            $label = sprintf('%s Search Appearance', $post_type->label);
+            $status = true; // Assume passed initially
+            $message = sprintf('%s search appearance is properly configured.', $post_type->label);
+            $type = 'passed';
+            $action = null;
+
+            // Construct the correct action URL for this post type
+            $edit_url = admin_url('admin.php?page=wpseo_page_settings#/post-type/' . $post_type->name);
+
+            // Logic based on public status and Yoast noindex setting
+            // echo '<pre>';
+            // var_dump($post_type);
+            // echo '</pre>';
+            if (($post_type->publicly_queryable AND !$post_type->public) OR (!$post_type->publicly_queryable AND $post_type->public)) {
+                // Public post type: Should generally be indexed unless intentionally hidden.
+                if (!$yoast_noindex_is_true) {
+                    // Public but set to noindex (Warning - might be intentional, but worth noting)
+                    $status = false;
+                    $message = sprintf('%s is public but set to noindex in Yoast SEO. Consider enabling it unless intentionally hidden.', $post_type->label);
+                    $type = 'failed';
+                    $action = [
+                        'label' => 'Edit Yoast Settings',
+                        'url' => $edit_url
+                    ];
+                } else {
+                    // Public and set to index (Correct - PASS for public)
+                    $status = true;
+                    $message = sprintf('%s search appearance is properly configured for a public post type.', $post_type->label);
+                    $type = 'passed';
+                    $action = null; // No action needed if passed
+                }
+                
+            } 
+            else {
+                // Non-public and noindexed (Correct - PASS)
+                $status = true;
+                $message = sprintf('%s is set to not be shown in search results in Yoast SEO (OK).', $post_type->label);
+                $type = 'passed';
+                $action = null; // No action needed if passed
+            }
+
+             $custom_post_type_checks[] = [
+                'label' => $label,
+                'status' => $status,
+                'message' => $message,
+                'type' => $type,
+                'action' => $action,
+                'slug' => $post_type->name // Still include slug, though not used in get_action_link with the generic case
+            ];
+        }
+
+        // Return the array of individual custom post type checks
+        return $custom_post_type_checks;
+    }
+
+    private static function check_yoast_xml_sitemap() {
+        // Implementation of check_yoast_xml_sitemap method
     }
 
     private static function check_image_metadata() {

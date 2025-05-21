@@ -457,16 +457,52 @@ class WPA_Admin {
                                 // Sort checks to show failed items first
                                 $checks = $report[$current_tab];
                                 usort($checks, function($a, $b) {
-                                    if ($a['status'] === $b['status']) return 0;
-                                    return $a['status'] ? 1 : -1;
+                                    // Define an order for sorting: failed > warning > passed
+                                    $order = ['failed' => 1, 'warning' => 2, 'passed' => 3];
+
+                                    // Get the effective type for sorting
+                                    $type_a = isset($a['type']) ? $a['type'] : ($a['status'] ? 'passed' : 'failed');
+                                    $type_b = isset($b['type']) ? $b['type'] : ($b['status'] ? 'passed' : 'failed');
+
+                                    $order_a = isset($order[$type_a]) ? $order[$type_a] : 4;
+                                    $order_b = isset($order[$type_b]) ? $order[$type_b] : 4;
+
+                                    if ($order_a === $order_b) return 0;
+                                    return ($order_a < $order_b) ? -1 : 1;
                                 });
                                 
                                 foreach ($checks as $check) : 
                                     $action_link = self::get_action_link($current_tab, $check);
+
+                                    // Determine status icon, text, and class based on status and type
+                                    $status_icon = '';
+                                    $status_text = '';
+                                    $status_class = '';
+
+                                    if ($check['status'] === true) {
+                                        $status_icon = '✅';
+                                        $status_text = 'Passed';
+                                        $status_class = 'passed';
+                                    } else {
+                                        // Status is false, check the type
+                                        switch (isset($check['type']) ? $check['type'] : 'failed') {
+                                            case 'warning':
+                                                $status_icon = '⚠️';
+                                                $status_text = 'Warning';
+                                                $status_class = 'warning';
+                                                break;
+                                            case 'failed':
+                                            default:
+                                                $status_icon = '❌';
+                                                $status_text = 'Failed';
+                                                $status_class = 'failed';
+                                                break;
+                                        }
+                                    }
                                 ?>
                                     <tr>
                                         <td><?php echo esc_html($check['label']); ?></td>
-                                        <td><?php echo $check['status'] ? '✅ Passed' : '❌ Failed'; ?></td>
+                                        <td class="<?php echo esc_attr($status_class); ?>"><?php echo $status_icon . ' ' . esc_html($status_text); ?></td>
                                         <td><?php echo esc_html($check['message']); ?></td>
                                         <td>
                                             <?php if (!$check['status'] && $action_link) : ?>
@@ -595,13 +631,46 @@ class WPA_Admin {
                     case 'Homepage Title Template':
                     case 'Default Social Image':
                         return [
-                            'url' => admin_url('admin.php?page=wpseo_titles'),
+                            'url' => admin_url('admin.php?page=wpseo_page_settings#/site-basics'),
+                            'text' => 'Edit Yoast Settings'
+                        ];
+                    case 'Author Archives':
+                        return [
+                            'url' => admin_url('admin.php?page=wpseo_page_settings#/author-archives'),
+                            'text' => 'Edit Yoast Settings'
+                        ];
+                    case 'Date Archives':
+                        return [
+                            'url' => admin_url('admin.php?page=wpseo_page_settings#/date-archives'),
+                            'text' => 'Edit Yoast Settings'
+                        ];
+                    case 'Format Archives':
+                        return [
+                            'url' => admin_url('admin.php?page=wpseo_page_settings#/format-archives'),
+                            'text' => 'Edit Yoast Settings'
+                        ];
+                    case 'Media Pages':
+                        return [
+                            'url' => admin_url('admin.php?page=wpseo_page_settings#/post-type/attachment'),
+                            'text' => 'Edit Yoast Settings'
+                        ];
+                    case (strpos($check['label'], ' Search Appearance') !== false):
+                        $post_type_slug = isset($check['slug']) ? $check['slug'] : '';
+                        if (!empty($post_type_slug)) {
+                            return [
+                                'url' => admin_url('admin.php?page=wpseo_page_settings#/post-type/' . $post_type_slug),
+                                'text' => 'Edit Yoast Settings'
+                            ];
+                        }
+                        return [
+                            'url' => admin_url('admin.php?page=wpseo_page_settings'),
                             'text' => 'Edit Yoast Settings'
                         ];
                 }
                 break;
         }
         
+        // Return null if no specific action link is found
         return null;
     }
 }
