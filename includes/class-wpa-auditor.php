@@ -365,14 +365,16 @@ class WPA_Auditor {
             if (!empty($issues) || !empty($warnings)) {
                 $details = [];
                 
-                // Always include dimension details for images with issues
-                if (!empty($metadata['width']) && !empty($metadata['height'])) {
-                    $details[] = sprintf('Dimensions: %dpx × %dpx', $metadata['width'], $metadata['height']);
-                }
-                if ($file_path && file_exists($file_path)) {
-                    $size = filesize($file_path);
-                    $size_mb = $size / 1024 / 1024;
-                    $details[] = sprintf('File size: %.2f MB', $size_mb);
+                // Only include dimension and file size details if there's a size/dimension issue
+                if ($size_mb >= 0.5 || (!empty($metadata['width']) && !empty($metadata['height']) && ($status === 'failed' || $status === 'warning') && (in_array('The image is too large. Consider optimizing below 0.5MBs/500KBs but definitely lower than 1MB.', $issues) || in_array('The image is a bit too large. Consider optimizing it below 0.5MBs/500KBs.', $warnings)))) {
+                     if (!empty($metadata['width']) && !empty($metadata['height'])) {
+                        $details[] = sprintf('Dimensions: %dpx × %dpx', $metadata['width'], $metadata['height']);
+                    }
+                    if ($file_path && file_exists($file_path)) {
+                        $size = filesize($file_path);
+                        $size_mb = $size / 1024 / 1024;
+                        $details[] = sprintf('File size: %.2f MB', $size_mb);
+                    }
                 }
 
                 $images_with_issues[] = [
