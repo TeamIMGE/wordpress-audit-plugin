@@ -253,13 +253,6 @@ class WPA_Auditor {
             // We need to check explicitly against '1' for the noindex true case.
             $yoast_noindex_is_true = $yoast_noindex_option_exists && (string)$yoast_options['noindex-' . $post_type->name] === '1';
 
-            // Debugging output for custom post types (moved after calculation)
-            if ($post_type->name === 'page_section') {
-                echo '<pre>Debug: Page Section Post Type</pre>';
-                var_dump($post_type->name, $post_type->public, $yoast_noindex_option_exists, (isset($yoast_options['noindex-' . $post_type->name]) ? $yoast_options['noindex-' . $post_type->name] : 'N/A'), $yoast_noindex_is_true);
-                echo '<pre>End Debug</pre>';
-            }
-
             $label = sprintf('%s Search Appearance', $post_type->label);
             $status = true; // Assume passed initially
             $message = sprintf('%s search appearance is properly configured.', $post_type->label);
