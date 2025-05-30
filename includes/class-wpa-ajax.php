@@ -6,6 +6,7 @@ class WPA_Ajax {
         add_action('wp_ajax_wpa_save_inline_edit', [__CLASS__, 'save_inline_edit']);
         add_action('wp_ajax_wpa_save_alt_text', [__CLASS__, 'save_alt_text']);
         add_action('wp_ajax_wpa_check_image_status', [__CLASS__, 'check_image_status']);
+        add_action('wp_ajax_wpa_generate_alt_text', [__CLASS__, 'handle_generate_alt_text']);
     }
 
     public static function load_inline_edit() {
@@ -193,5 +194,44 @@ class WPA_Ajax {
             'warnings' => $warnings,
             'details' => $details
         ]);
+    }
+
+    /**
+     * Handles the AJAX request to generate alt text for an image using AI.
+     */
+    public static function handle_generate_alt_text() {
+        error_log('WPA_Ajax: handle_generate_alt_text started'); // Log start
+
+        // Verify the nonce for security
+        check_ajax_referer('wpa_generate_alt_text', 'nonce');
+        error_log('WPA_Ajax: Nonce check passed'); // Log after nonce check
+
+        // Check user capabilities
+        if (!current_user_can('upload_files')) { // Assuming users who can upload files can generate alt text
+            wp_send_json_error('Insufficient permissions.');
+        }
+
+        $attachment_id = isset($_POST['attachment_id']) ? intval($_POST['attachment_id']) : 0;
+
+        if (!$attachment_id) {
+            wp_send_json_error('Invalid image ID.');
+        }
+
+        // Call the function in WPA_Auditor to generate alt text
+        $alt_text_options = WPA_Auditor::generate_alt_text_with_bedrock($attachment_id);
+
+        if (is_wp_error($alt_text_options)) {
+            // If WPA_Auditor returned an error, send a JSON error response
+            wp_send_json_error($alt_text_options->get_error_message());
+        } else if (empty($alt_text_options)) {
+             // If no options were returned (e.g., API call successful but no text generated)
+             wp_send_json_error('AI generated no suggestions.');
+        } else {
+            // On success, send the generated alt text options back as JSON
+            wp_send_json_success($alt_text_options);
+        }
+
+        // Always die at the end of an AJAX handler
+        wp_die();
     }
 } 

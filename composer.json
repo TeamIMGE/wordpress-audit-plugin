@@ -3,7 +3,8 @@
     "description": "A plugin to audit WordPress settings and other criteria.",
     "type": "wordpress-plugin",
     "require": {
-        "yahnis-elsts/plugin-update-checker": "^5.2"
+        "yahnis-elsts/plugin-update-checker": "^5.2",
+        "aws/aws-sdk-php": "^3.343"
     },
     "autoload": {
         "psr-4": {
