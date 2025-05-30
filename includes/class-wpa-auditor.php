@@ -263,9 +263,6 @@ class WPA_Auditor {
             $edit_url = admin_url('admin.php?page=wpseo_page_settings#/post-type/' . $post_type->name);
 
             // Logic based on public status and Yoast noindex setting
-            // echo '<pre>';
-            // var_dump($post_type);
-            // echo '</pre>';
             if (($post_type->publicly_queryable AND !$post_type->public) OR (!$post_type->publicly_queryable AND $post_type->public)) {
                 // Public post type: Should generally be indexed unless intentionally hidden.
                 if (!$yoast_noindex_is_true) {
@@ -396,5 +393,175 @@ class WPA_Auditor {
             'message' => empty($images_with_issues) ? 'All images have proper metadata' : 'Found images with metadata issues',
             'details' => $images_with_issues
         ];
+    }
+
+    /**
+     * Generates alt text options for an image using AWS Bedrock.
+     *
+     * @param int $attachment_id The WordPress image attachment ID.
+     * @return array|WP_Error An array of generated alt text options on success, or a WP_Error object on failure.
+     */
+    public static function generate_alt_text_with_bedrock($attachment_id) {
+        // Get the image file path
+        $file_path = get_attached_file($attachment_id);
+
+        if (!$file_path || !file_exists($file_path)) {
+            return new WP_Error('image_error', 'Image file not found.');
+        }
+
+        // Read the image file content
+        $image_data = file_get_contents($file_path);
+        if ($image_data === false) {
+            return new WP_Error('image_error', 'Could not read image file.');
+        }
+
+        // Get image MIME type for the API
+        $image_mime = get_post_mime_type($attachment_id);
+        if (!$image_mime) {
+             // Try to guess based on file extension if WP doesn't have it
+            $image_mime = mime_content_type($file_path);
+            if (!$image_mime) {
+                 return new WP_Error('image_error', 'Could not determine image MIME type.');
+            }
+        }
+
+        // Base64 encode the image data
+        $base64_image = base64_encode($image_data);
+
+        // Retrieve AWS settings from options
+        $aws_settings = get_option('wpa_aws_settings', []);
+
+        // Validate that required settings are present
+        if (empty($aws_settings['access_key_id']) || empty($aws_settings['secret_access_key']) || empty($aws_settings['region'])) {
+            return new WP_Error('aws_config_error', 'AWS credentials or region are not fully configured in plugin settings.');
+        }
+
+        // Get the encryption key from the database option
+        $encryption_key = wpa_get_encryption_key(); // Function defined in main plugin file
+
+        if (false === $encryption_key) {
+            return new WP_Error('aws_config_error', 'Encryption key not found in database. Cannot decrypt AWS Secret Access Key. Please try deactivating and reactivating the plugin.');
+        }
+
+        // Decrypt the Secret Access Key using the helper function from WPA_Admin and the database key
+        $decrypted_secret_access_key = WPA_Admin::decrypt_data($aws_settings['secret_access_key'], $encryption_key);
+
+        if (is_wp_error($decrypted_secret_access_key)) {
+             return new WP_Error('aws_config_error', 'Failed to decrypt AWS Secret Access Key: ' . $decrypted_secret_access_key->get_error_message());
+        }
+
+        // Initialize Bedrock Runtime Client using retrieved and decrypted credentials
+        try {
+            // Ensure required classes are loaded (Composer autoloader should handle this in main plugin file)
+            if (!class_exists('Aws\\BedrockRuntime\\BedrockRuntimeClient') || !class_exists('Aws\\Credentials\\Credentials')) {
+                 return new WP_Error('aws_sdk_error', 'AWS SDK classes not loaded. Ensure Composer autoloader is included.');
+            }
+
+            $credentials = new \Aws\Credentials\Credentials(
+                $aws_settings['access_key_id'],
+                $decrypted_secret_access_key
+            );
+
+            $bedrockClient = new \Aws\BedrockRuntime\BedrockRuntimeClient([
+                'region' => $aws_settings['region'],
+                'version' => 'latest',
+                'credentials' => $credentials,
+            ]);
+
+            // Model ID for Claude 3.5 Sonnet via Bedrock
+            // Verify this ID in your Bedrock console, or make it a plugin setting
+            $modelId = 'us.anthropic.claude-sonnet-4-20250514-v1:0'; // Updated to US Claude Sonnet 4 Inference Profile ID
+
+            // Prepare the prompt and image for the API call
+            $prompt = "Generate three distinct, concise, and descriptive alternative text options for this image. Respond with a JSON object containing a single key, 'alt_options', whose value is an array of strings, where each string is one alt text option.";
+
+            $requestBody = json_encode([
+                'anthropic_version' => 'bedrock-2023-05-31', // Required for Anthropic models
+                'max_tokens' => 300, // Adjust as needed
+                'messages' => [
+                    [
+                        'role' => 'user',
+                        'content' => [
+                            [
+                                'type' => 'image',
+                                'source' => [
+                                    'type' => 'base64',
+                                    'data' => $base64_image,
+                                    'media_type' => $image_mime
+                                ],
+                            ],
+                            [
+                                'type' => 'text',
+                                'text' => $prompt,
+                            ],
+                        ],
+                    ],
+                ],
+            ]);
+
+            // Make the API call
+            $result = $bedrockClient->invokeModel([
+                'contentType' => 'application/json',
+                'body' => $requestBody,
+                'modelId' => $modelId,
+            ]);
+
+            // Log the raw Bedrock API result
+            error_log('Bedrock API Result: ' . print_r($result, true));
+
+            // Process the response
+            $responseBody = json_decode($result['body'], true);
+
+            // Log the decoded response body
+            error_log('Decoded Response Body: ' . print_r($responseBody, true));
+
+            // Extract the generated text - for Claude, it's in $responseBody['content'][0]['text']
+            // We asked for JSON output, so we need to decode that JSON string within the text
+            $raw_generated_text = $responseBody['content'][0]['text'] ?? null;
+
+            if (empty($raw_generated_text)) {
+                 return new WP_Error('bedrock_error', 'Bedrock response was empty or unexpected.');
+            }
+
+            // Use regex to extract JSON string from markdown code block
+            // This handles cases where the model wraps the JSON in ```json ... ```
+            if (preg_match('/```json\s*(.*?)\s*```/s', $raw_generated_text, $matches) && isset($matches[1])) {
+                $json_string_to_decode = $matches[1];
+            } else {
+                // If no markdown json block found, assume the whole text is the json string (less likely but possible)
+                $json_string_to_decode = $raw_generated_text;
+            }
+
+            if (empty($json_string_to_decode)) {
+                 return new WP_Error('bedrock_error', 'Bedrock response was empty or unexpected.');
+            }
+
+            // Attempt to decode the JSON string from the model's response
+            $alt_options_response = json_decode($json_string_to_decode, true);
+
+            // Check if JSON decoding was successful and the expected structure exists
+            if (json_last_error() !== JSON_ERROR_NONE || !isset($alt_options_response['alt_options']) || !is_array($alt_options_response['alt_options'])) {
+                 // If the model didn't return valid JSON or the expected structure
+                 // Fallback: try parsing raw text for lines, filter empty, take max 3
+                  $options = explode("\n", trim($json_string_to_decode));
+                  $options = array_filter($options, 'trim');
+                  $options = array_slice($options, 0, 3);
+
+                  if(empty($options)) {
+                       return new WP_Error('bedrock_error', 'Bedrock response format unexpected, could not extract options.');
+                  }
+                  return $options;
+            }
+
+            // Return the array of alt text options from the JSON response
+            return $alt_options_response['alt_options'];
+
+        } catch (\Aws\Exception\AwsException $e) {
+            // Handle AWS specific errors
+            return new WP_Error('aws_api_error', 'AWS API error: ' . $e->getMessage());
+        } catch (\Exception $e) {
+            // Handle other potential errors
+            return new WP_Error('general_error', 'An error occurred: ' . $e->getMessage());
+        }
     }
 }
